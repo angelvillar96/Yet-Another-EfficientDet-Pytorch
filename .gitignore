@@ -3,6 +3,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# my gitignores
+*.jpg
+*.lms37-22
+
 # C extensions
 *.so
 

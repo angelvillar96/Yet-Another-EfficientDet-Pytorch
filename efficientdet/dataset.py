@@ -1,4 +1,5 @@
 import os
+import json
 import torch
 import numpy as np
 
@@ -18,12 +19,47 @@ class CocoDataset(Dataset):
         self.image_ids = self.coco.getImgIds()
 
         self.load_classes()
+        self.load_mapping_dict()
+
+        return
+
+    def load_mapping_dict(self):
+        """
+        @author: Angel Villar-Corrales
+        """
+
+        if self.set_name=="train":
+            cur_dict = "train_dict.json"
+        elif self.set_name=="validation":
+            cur_dict = "valid_dict.json"
+        else:
+            self.mapping_dict = None
+            return
+
+
+        mapping_dict_path = os.path.join("/home/corrales/MasterThesis/data/mapping_dicts", cur_dict)
+        print(f"Loading {mapping_dict_path}...")
+
+        if( not os.path.exists(mapping_dict_path) ):
+            assert Error("Dictionary mapping COCO to Styled_COCO does not exists." +\
+                         "  Run 'aux_styled_coco_preload' to generate the dictionaries.")
+
+        with open(mapping_dict_path) as f:
+            mapping_dict = json.load(f)
+        self.mapping_dict = mapping_dict
+
+        return
+
 
     def load_classes(self):
 
         # load class names (name -> label)
         categories = self.coco.loadCats(self.coco.getCatIds())
         categories.sort(key=lambda x: x['id'])
+
+        # selecting only the person category for the Styled-COCO
+        if self.set_name=="train" or self.set_name=="validation":
+            categories = [categories[0]]
 
         self.classes = {}
         for c in categories:
@@ -33,6 +69,8 @@ class CocoDataset(Dataset):
         self.labels = {}
         for key, value in self.classes.items():
             self.labels[value] = key
+
+        return
 
     def __len__(self):
         return len(self.image_ids)
@@ -48,11 +86,25 @@ class CocoDataset(Dataset):
 
     def load_image(self, image_index):
         image_info = self.coco.loadImgs(self.image_ids[image_index])[0]
-        path = os.path.join(self.root_dir, self.set_name, image_info['file_name'])
+        img_name = self._get_styled_image_given_original(image_info['file_name'])
+        path = os.path.join(self.root_dir, self.set_name, img_name)
         img = cv2.imread(path)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
         return img.astype(np.float32) / 255.
+
+
+    def _get_styled_image_given_original(self, original_name):
+        """
+        Fetching the name of the styled image given the name of the original one
+        """
+
+        original_name = '%012d' % float(original_name[:-4])
+        if(self.mapping_dict is None):
+            return original_name
+        cur_styled_img_name = self.mapping_dict[original_name]
+        return cur_styled_img_name
+
 
     def load_annotations(self, image_index):
         # get ground truth annotations
@@ -69,6 +121,9 @@ class CocoDataset(Dataset):
 
             # some annotations have basically no width / height, skip them
             if a['bbox'][2] < 1 or a['bbox'][3] < 1:
+                continue
+            # if the annotation is not a person, we skip it
+            if a['category_id'] != 1:
                 continue
 
             annotation = np.zeros((1, 5))
@@ -109,7 +164,7 @@ def collater(data):
 
 class Resizer(object):
     """Convert ndarrays in sample to Tensors."""
-    
+
     def __init__(self, img_size=512):
         self.img_size = img_size
 
